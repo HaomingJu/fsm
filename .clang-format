@@ -1,0 +1,6 @@
+BasedOnStyle:  Google
+AllowShortIfStatementsOnASingleLine: false
+DerivePointerAlignment: false
+PointerAlignment: Left
+AlignTrailingComments: true
+MaxEmptyLinesToKeep: 2
