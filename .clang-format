@@ -4,3 +4,8 @@ DerivePointerAlignment: false
 PointerAlignment: Left
 AlignTrailingComments: true
 MaxEmptyLinesToKeep: 2
+AlwaysBreakTemplateDeclarations: false
+AllowShortFunctionsOnASingleLine: false
+
+
+
