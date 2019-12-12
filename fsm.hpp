@@ -42,7 +42,7 @@ inline std::string to_string(const std::string& t) {
   return t;
 }
 
-typedef std::vector<std::string> args;
+typedef void* args;
 typedef std::function<void(const fsm::args& args)> call;
 
 struct state {
@@ -56,12 +56,15 @@ struct state {
     self.args = {};
     return self;
   }
+
   template <typename T0>
   state operator()(const T0& t0) const {
     state self = *this;
-    self.args = {fsm::to_string(t0)};
+    self.args = const_cast<T0>(t0);
     return self;
   }
+
+
   template <typename T0, typename T1>
   state operator()(const T0& t0, const T1& t1) const {
     state self = *this;
@@ -74,25 +77,32 @@ struct state {
   bool operator<(const state& other) const { return name < other.name; }
   bool operator==(const state& other) const { return name == other.name; }
 
+  /* TODO
   template <typename ostream>
-  inline friend ostream& operator<<(ostream& out, const state& t) {
-    if (t.name >= 256) {
-      out << char((t.name >> 24) & 0xff);
-      out << char((t.name >> 16) & 0xff);
-      out << char((t.name >> 8) & 0xff);
-      out << char((t.name >> 0) & 0xff);
-    } else {
-      out << t.name;
-    }
-    out << "(";
-    std::string sep;
-    for (auto& arg : t.args) {
-      out << sep << arg;
-      sep = ',';
-    }
-    out << ")";
-    return out;
+  inline friend ostream& operator<<(ostream& out, const state& t)
+  {
+      if(t.name >= 256)
+      {
+          out << char((t.name >> 24) & 0xff);
+          out << char((t.name >> 16) & 0xff);
+          out << char((t.name >> 8) & 0xff);
+          out << char((t.name >> 0) & 0xff);
+      }
+      else
+      {
+          out << t.name;
+      }
+      out << "(";
+      std::string sep;
+      for(auto& arg : t.args)
+      {
+          out << sep << arg;
+          sep = ',';
+      }
+      out << ")";
+      return out;
   }
+  */
 };
 
 typedef state trigger;
@@ -181,13 +191,6 @@ class stack {
     return deque.empty() ? false : (deque.back() == state);
   }
 
-  /* (idle)___(trigger)__/''(hold)''''(release)''\__
-  bool is_idle()      const { return transition.previous == transition.current;
-  } bool is_triggered() const { return transition.previous ==
-  transition.current; } bool is_hold()      const { return transition.previous
-  == transition.current; } bool is_released()  const { return
-  transition.previous == transition.current; } */
-
   // setup
   fsm::call& on(const fsm::state& from, const fsm::state& to) {
     return callbacks[bistate(from, to)];
@@ -231,10 +234,12 @@ class stack {
     }
     return false;
   }
+
   template <typename T>
   bool command(const fsm::state& trigger, const T& arg1) {
     return command(trigger(arg1));
   }
+
   template <typename T, typename U>
   bool command(const fsm::state& trigger, const T& arg1, const U& arg2) {
     return command(trigger(arg1, arg2));
@@ -292,212 +297,3 @@ class stack {
   typedef std::deque<fsm::state> states;
 };
 }  // namespace fsm
-
-#ifdef FSM_BUILD_SAMPLE1
-
-// basic fsm, CD player sample
-
-#include <iostream>
-
-// custom states (gerunds) and actions (infinitives)
-
-enum {
-  opening,
-  closing,
-  waiting,
-  playing,
-
-  open,
-  close,
-  play,
-  stop,
-  insert,
-  eject,
-};
-
-struct cd_player {
-  // implementation variables
-  bool has_cd;
-
-  // implementation conditions / guards
-  bool good_disk_format() { return true; }
-
-  // implementation actions
-  void open_tray() { std::cout << "opening tray" << std::endl; }
-  void close_tray() { std::cout << "closing tray" << std::endl; }
-  void get_cd_info() { std::cout << "retrieving CD info" << std::endl; }
-  void start_playback(const std::string& track) {
-    std::cout << "playing track #" << track << std::endl;
-  }
-
-  // the core
-  fsm::stack fsm;
-
-  cd_player() : has_cd(false) {
-    // define fsm transitions: on(state,trigger) -> do lambda
-    fsm.on(opening, close) = [&](const fsm::args& args) {
-      close_tray();
-      if (!has_cd) {
-        fsm.set(closing);
-      } else {
-        get_cd_info();
-        fsm.set(waiting);
-      }
-    };
-    fsm.on(opening, insert) = [&](const fsm::args& args) {
-      has_cd = true;
-      fsm.set(opening);
-    };
-    fsm.on(opening, eject) = [&](const fsm::args& args) {
-      has_cd = false;
-      fsm.set(opening);
-    };
-
-    fsm.on(closing, open) = [&](const fsm::args& args) {
-      open_tray();
-      fsm.set(opening);
-    };
-
-    fsm.on(waiting, play) = [&](const fsm::args& args) {
-      if (!good_disk_format()) {
-        fsm.set(waiting);
-      } else {
-        start_playback(args[0]);
-        fsm.set(playing);
-      }
-    };
-    fsm.on(waiting, open) = [&](const fsm::args& args) {
-      open_tray();
-      fsm.set(opening);
-    };
-
-    fsm.on(playing, open) = [&](const fsm::args& args) {
-      open_tray();
-      fsm.set(opening);
-    };
-    fsm.on(playing, stop) = [&](const fsm::args& args) { fsm.set(waiting); };
-
-    // set initial fsm state
-    fsm.set(opening);
-  }
-};
-
-// usage
-
-int main() {
-  cd_player cd;
-
-  for (;;) {
-    std::cout << "[" << cd.fsm.get_state() << "] ";
-    std::cout
-        << "(o)pen lid/(c)lose lid, (i)nsert cd/(e)ject cd, (p)lay/(s)top cd? ";
-
-    char cmd;
-    std::cin >> cmd;
-
-    switch (cmd) {
-      case 'p':
-        cd.fsm.command(play, 1 + rand() % 10);
-        break;
-      case 'o':
-        cd.fsm.command(open);
-        break;
-      case 'c':
-        cd.fsm.command(close);
-        break;
-      case 's':
-        cd.fsm.command(stop);
-        break;
-      case 'i':
-        cd.fsm.command(insert);
-        break;
-      case 'e':
-        cd.fsm.command(eject);
-        break;
-      default:
-        std::cout << "what?" << std::endl;
-    }
-  }
-}
-
-#endif
-
-#ifdef FSM_BUILD_SAMPLE2
-
-// basic hfsm sample
-
-#include <iostream>
-
-// custom states (gerunds) and actions (infinitives)
-
-enum {
-  walking = 'WALK',
-  defending = 'DEFN',
-
-  tick = 'tick',
-};
-
-struct ant_t {
-  fsm::stack fsm;
-  int health, distance, flow;
-
-  ant_t() : health(0), distance(0), flow(1) {
-    // define fsm transitions: on(state,trigger) -> do lambda
-    fsm.on(walking, 'init') = [&](const fsm::args& args) {
-      std::cout << "initializing" << std::endl;
-    };
-    fsm.on(walking, 'quit') = [&](const fsm::args& args) {
-      std::cout << "exiting" << std::endl;
-    };
-    fsm.on(walking, 'push') = [&](const fsm::args& args) {
-      std::cout << "pushing current task." << std::endl;
-    };
-    fsm.on(walking, 'back') = [&](const fsm::args& args) {
-      std::cout << "back from another task. remaining distance: " << distance
-                << std::endl;
-    };
-    fsm.on(walking, tick) = [&](const fsm::args& args) {
-      std::cout << "\r"
-                << "\\|/-"[distance % 4] << " walking "
-                << (flow > 0 ? "-->" : "<--") << " ";
-      distance += flow;
-      if (1000 == distance) {
-        std::cout << "at food!" << std::endl;
-        flow = -flow;
-      }
-      if (-1000 == distance) {
-        std::cout << "at home!" << std::endl;
-        flow = -flow;
-      }
-    };
-    fsm.on(defending, 'init') = [&](const fsm::args& args) {
-      health = 1000;
-      std::cout << "somebody is attacking me! he has " << health
-                << " health points" << std::endl;
-    };
-    fsm.on(defending, tick) = [&](const fsm::args& args) {
-      std::cout << "\r"
-                << "\\|/-$"[health % 4] << " health: (" << health << ")   ";
-      --health;
-      if (health < 0) {
-        std::cout << std::endl;
-        fsm.pop();
-      }
-    };
-
-    // set initial fsm state
-    fsm.set(walking);
-  }
-};
-
-int main() {
-  ant_t ant;
-  for (int i = 0; i < 12000; ++i) {
-    if (0 == rand() % 10000) {
-      ant.fsm.push(defending);
-    }
-    ant.fsm.command(tick);
-  }
-}
-
-#endif
